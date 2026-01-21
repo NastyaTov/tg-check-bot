@@ -1,6 +1,7 @@
 import os
 import smtplib
 from email.message import EmailMessage
+import asyncio
 
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
@@ -14,12 +15,11 @@ from starlette.routing import Route
 # ======================
 # НАСТРОЙКИ
 # ======================
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-
-SMTP_EMAIL = os.getenv("SMTP_EMAIL")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
+BOT_TOKEN = os.getenv("8505195706:AAF6tJXKuK879TkUytXgvA4dOPWr3WCZY5Y")  # Ваш токен бота
+SMTP_EMAIL = os.getenv("CheckReportSber@gmail.com")  # Gmail
+SMTP_PASSWORD = os.getenv("oisypvcu ksfg aqfz")  # App Password
 SMTP_SERVER = "smtp.gmail.com"
-SMTP_PORT = 587
+SMTP_PORT = 465  # SSL порт
 
 RECIPIENTS = [
     "Avatovkach@sberbank.ru",
@@ -32,7 +32,7 @@ RECIPIENTS = [
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-user_data = {}
+user_data = {}  # user_id -> {"fio": str, "photos": list}
 
 # ======================
 # КЛАВИАТУРЫ
@@ -54,6 +54,9 @@ def keyboard_with_send():
 # EMAIL
 # ======================
 def send_email(photos, fio):
+    """
+    Синхронная отправка письма через SMTP_SSL
+    """
     try:
         msg = EmailMessage()
         msg["Subject"] = f"Чеки от {fio}"
@@ -61,7 +64,6 @@ def send_email(photos, fio):
         msg["To"] = ", ".join(RECIPIENTS)
         msg.set_content(f"Отправитель: {fio}")
 
-        # Добавляем фото
         for photo in photos:
             if not os.path.exists(photo):
                 print(f"❌ Файл не найден: {photo}")
@@ -74,7 +76,6 @@ def send_email(photos, fio):
                     filename=os.path.basename(photo)
                 )
 
-        # Подключаемся через SSL
         with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
             server.login(SMTP_EMAIL, SMTP_PASSWORD)
             server.send_message(msg)
@@ -100,44 +101,41 @@ async def start(message: types.Message):
     )
 
 # ======================
-# ВВОД ФИО
+# Ввод ФИО
 # ======================
 @dp.message(lambda m: m.text and m.text not in ["📨 Отправить", "❌ Сбросить"])
 async def set_fio(message: types.Message):
     fio = message.text.strip()
-
     if len(fio.split()) < 2:
         await message.answer("❌ Введите ФИО полностью")
         return
 
     user_data[message.from_user.id] = {"fio": fio, "photos": []}
-
     await message.answer(
-        f"✅ ФИО сохранено: <b>{fio}</b>\n\n"
-        "📸 Теперь отправьте фото чеков",
+        f"✅ ФИО сохранено: <b>{fio}</b>\n\n📸 Теперь отправьте фото чеков",
         parse_mode="HTML",
         reply_markup=keyboard_no_send()
     )
 
 # ======================
-# ПРИЁМ ФОТО
+# Получение фото
 # ======================
 @dp.message(lambda m: m.photo)
 async def receive_photo(message: types.Message):
     user_id = message.from_user.id
+    data = user_data.get(user_id)
 
-    if user_id not in user_data or not user_data[user_id]["fio"]:
+    if not data or not data["fio"]:
         await message.answer("❌ Сначала введите ФИО")
         return
 
     photo = message.photo[-1]
     file = await bot.get_file(photo.file_id)
-
-    index = len(user_data[user_id]["photos"]) + 1
+    index = len(data["photos"]) + 1
     path = f"receipt_{user_id}_{index}.jpg"
 
     await bot.download_file(file.file_path, path)
-    user_data[user_id]["photos"].append(path)
+    data["photos"].append(path)
 
     await message.answer(
         f"📸 Фото №{index} добавлено",
@@ -145,7 +143,7 @@ async def receive_photo(message: types.Message):
     )
 
 # ======================
-# 📨 ОТПРАВИТЬ
+# Отправка фото
 # ======================
 @dp.message(lambda m: m.text == "📨 Отправить")
 async def send_photos(message: types.Message):
@@ -156,10 +154,13 @@ async def send_photos(message: types.Message):
         await message.answer("❌ Нет фото для отправки")
         return
 
-    send_email(data["photos"], data["fio"])
+    # Вызов синхронной функции в отдельном потоке, чтобы не блокировать бота
+    await asyncio.to_thread(send_email, data["photos"], data["fio"])
 
+    # Удаляем локальные файлы
     for p in data["photos"]:
-        os.remove(p)
+        if os.path.exists(p):
+            os.remove(p)
 
     user_data[user_id] = {"fio": None, "photos": []}
 
@@ -169,7 +170,7 @@ async def send_photos(message: types.Message):
     )
 
 # ======================
-# ❌ СБРОС
+# Сброс
 # ======================
 @dp.message(lambda m: m.text == "❌ Сбросить")
 async def reset(message: types.Message):
@@ -180,7 +181,7 @@ async def reset(message: types.Message):
     )
 
 # ======================
-# WEBHOOK + HTTP
+# WEBHOOK + HTTP (Starlette)
 # ======================
 async def telegram_webhook(request: Request):
     update = types.Update(**await request.json())
