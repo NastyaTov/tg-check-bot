@@ -1,55 +1,45 @@
 import os
 import asyncio
-
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
-
-from starlette.applications import Starlette
-from starlette.responses import JSONResponse
-from starlette.routing import Route
-
+from dotenv import load_dotenv
 import smtplib
 from email.message import EmailMessage
 
 # ======================
-# НАСТРОЙКИ
+# ЗАГРУЗКА .ENV
 # ======================
-BOT_TOKEN = os.getenv("8505195706:AAF6tJXKuK879TkUytXgvA4dOPWr3WCZY5Y")  # Токен Telegram бота
-SENDER_EMAIL = os.getenv("checkreportsber@gmail.com")  # Должен совпадать с логином SMTP
-RECIPIENTS = ["Avatovkach@sberbank.ru", "Mmazhukova@sberbank.ru"]
-
-SMTP_HOST = os.getenv("smtp.msndr.net")  # smtp.notisend.ru
-SMTP_PORT = int(os.getenv("465", 465))  # SSL порт
-SMTP_USER = os.getenv("checkreportsber@gmail.com")
-SMTP_PASS = os.getenv("2602acd5ea762769b83e63bdc1eac032")
+load_dotenv()
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+SENDER_EMAIL = os.getenv("NOTISEND_SMTP_USER")
+RECIPIENTS = os.getenv("RECIPIENTS").split(",")
+SMTP_HOST = os.getenv("NOTISEND_SMTP_HOST")
+SMTP_PORT = int(os.getenv("NOTISEND_SMTP_PORT", 465))
+SMTP_USER = os.getenv("NOTISEND_SMTP_USER")
+SMTP_PASS = os.getenv("NOTISEND_SMTP_PASS")
 
 # ======================
 # ИНИЦИАЛИЗАЦИЯ
 # ======================
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-
 user_data = {}  # user_id -> {"photos": list}
 
 # ======================
 # КЛАВИАТУРЫ
 # ======================
 def keyboard_no_send():
-    return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="❌ Сбросить")]],
-        resize_keyboard=True
-    )
+    return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Сбросить")]], resize_keyboard=True)
 
 def keyboard_with_send():
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="📨 Отправить"),
-                   KeyboardButton(text="❌ Сбросить")]],
+        keyboard=[[KeyboardButton(text="📨 Отправить"), KeyboardButton(text="❌ Сбросить")]],
         resize_keyboard=True
     )
 
 # ======================
-# ФУНКЦИЯ ОТПРАВКИ ПИСЕМ ЧЕРЕЗ NOTISEND SMTP
+# ФУНКЦИЯ ОТПРАВКИ ПИСЕМ ЧЕРЕЗ NotiSend SMTP
 # ======================
 def send_email(photos):
     try:
@@ -79,10 +69,7 @@ def send_email(photos):
 @dp.message(Command("start"))
 async def start(message: types.Message):
     user_data[message.from_user.id] = {"photos": []}
-    await message.answer(
-        "👋 Привет!\n📸 Пожалуйста, отправьте фото чеков по одному.",
-        reply_markup=keyboard_no_send()
-    )
+    await message.answer("👋 Привет!\n📸 Пожалуйста, отправьте фото чеков по одному.", reply_markup=keyboard_no_send())
 
 # ======================
 # ПОЛУЧЕНИЕ ФОТО
@@ -97,14 +84,10 @@ async def receive_photo(message: types.Message):
     file = await bot.get_file(photo.file_id)
     index = len(user_data[user_id]["photos"]) + 1
     path = f"receipt_{user_id}_{index}.jpg"
-
     await bot.download_file(file.file_path, path)
     user_data[user_id]["photos"].append(path)
 
-    await message.answer(
-        f"📸 Фото №{index} добавлено",
-        reply_markup=keyboard_with_send()
-    )
+    await message.answer(f"📸 Фото №{index} добавлено", reply_markup=keyboard_with_send())
 
 # ======================
 # 📨 ОТПРАВИТЬ
@@ -113,23 +96,17 @@ async def receive_photo(message: types.Message):
 async def send_photos(message: types.Message):
     user_id = message.from_user.id
     data = user_data.get(user_id)
-
     if not data or not data["photos"]:
         await message.answer("❌ Нет фото для отправки")
         return
 
     await asyncio.to_thread(send_email, data["photos"])
-
     for p in data["photos"]:
         if os.path.exists(p):
             os.remove(p)
 
     user_data[user_id] = {"photos": []}
-
-    await message.answer(
-        "✅ Чеки отправлены!\n📸 Можно отправлять новые фото",
-        reply_markup=keyboard_no_send()
-    )
+    await message.answer("✅ Чеки отправлены!\n📸 Можно отправлять новые фото", reply_markup=keyboard_no_send())
 
 # ======================
 # ❌ СБРОС
@@ -137,32 +114,11 @@ async def send_photos(message: types.Message):
 @dp.message(lambda m: m.text == "❌ Сбросить")
 async def reset(message: types.Message):
     user_data[message.from_user.id] = {"photos": []}
-    await message.answer(
-        "🔄 Сброшено\n📸 Пожалуйста, отправьте фото чеков",
-        reply_markup=keyboard_no_send()
-    )
+    await message.answer("🔄 Сброшено\n📸 Пожалуйста, отправьте фото чеков", reply_markup=keyboard_no_send())
 
 # ======================
-# WEBHOOK + HTTP (Starlette)
-# ======================
-async def telegram_webhook(request):
-    update = types.Update(**await request.json())
-    await dp.feed_update(bot, update)
-    return JSONResponse({"ok": True})
-
-async def health(request):
-    return JSONResponse({"status": "ok"})
-
-app = Starlette(
-    routes=[
-        Route("/webhook", telegram_webhook, methods=["POST"]),
-        Route("/health", health),
-    ]
-)
-
-# ======================
-# ЗАПУСК
+# ЗАПУСК ЧЕРЕЗ POLLING
 # ======================
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+    print("🚀 Бот запущен через polling...")
+    asyncio.run(dp.start_polling(bot))
