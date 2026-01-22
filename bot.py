@@ -3,21 +3,21 @@ import asyncio
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
-from dotenv import load_dotenv
 import smtplib
 from email.message import EmailMessage
 
 # ======================
-# ЗАГРУЗКА .ENV
+# ПОДСТАВЛЕННЫЕ ПЕРЕМЕННЫЕ
 # ======================
-load_dotenv()
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-SENDER_EMAIL = os.getenv("NOTISEND_SMTP_USER")
-RECIPIENTS = os.getenv("RECIPIENTS").split(",")
-SMTP_HOST = os.getenv("NOTISEND_SMTP_HOST")
-SMTP_PORT = int(os.getenv("NOTISEND_SMTP_PORT", 465))
-SMTP_USER = os.getenv("NOTISEND_SMTP_USER")
-SMTP_PASS = os.getenv("NOTISEND_SMTP_PASS")
+
+BOT_TOKEN = "8505195706:AAF6tJXKuK879TkUytXgvA4dOPWr3WCZY5Y"  # <- замени на свой токен от BotFather
+SENDER_EMAIL = "CheckReportSber@gmail.com"             # <- твой email в NotiSend
+RECIPIENTS = ["Avatovkach@sberbank.ru", "Mmazhukova@sberbank.ru"]
+
+SMTP_HOST = "smtp.msndr.net"
+SMTP_PORT = 465
+SMTP_USER = "checkreportsber@gmail.com"               # тот же, что SENDER_EMAIL
+SMTP_PASS = "2602acd5ea762769b83e63bdc1eac032"                   # <- пароль SMTP из NotiSend
 
 # ======================
 # ИНИЦИАЛИЗАЦИЯ
