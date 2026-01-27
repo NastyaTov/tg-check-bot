@@ -10,7 +10,7 @@ from datetime import datetime
 # ======================
 
 BOT_TOKEN = "8505195706:AAF6tJXKuK879TkUytXgvA4dOPWr3WCZY5Y"
-TELEGRAM_CHAT_ID = -5129189080  # <- сюда будут отправляться чеки (замени на свой чат ID)
+TELEGRAM_CHAT_ID = -5129189080  # chat_id группы (бот должен быть админом)
 
 # ======================
 # ЛОГИ
@@ -34,20 +34,37 @@ log("🚀 Бот инициализирован")
 # ======================
 
 def keyboard_no_send():
-    return ReplyKeyboardMarkup([[KeyboardButton("❌ Сбросить")]], resize_keyboard=True)
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="❌ Сбросить")]],
+        resize_keyboard=True
+    )
 
 def keyboard_with_send():
-    return ReplyKeyboardMarkup([[KeyboardButton("📨 Отправить"), KeyboardButton("❌ Сбросить")]], resize_keyboard=True)
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="📨 Отправить"), KeyboardButton(text="❌ Сбросить")]],
+        resize_keyboard=True
+    )
 
 # ======================
-# Функция отправки фото в Telegram
+# Отправка фото в группу
 # ======================
 
-async def send_photos_to_telegram(photos: list[str]):
-    for photo_path in photos:
-        log(f"🚚 Отправка фото {photo_path} в Telegram")
+async def send_photos_to_telegram(photos: list[str], user: types.User):
+    caption_base = (
+        "🧾 Новый чек\n"
+        f"👤 От: {user.full_name} (@{user.username or 'без username'})\n"
+        f"🕒 {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+    )
+
+    for i, photo_path in enumerate(photos, start=1):
+        log(f"🚚 Отправка {photo_path} в группу")
         try:
-            await bot.send_photo(chat_id=TELEGRAM_CHAT_ID, photo=open(photo_path, "rb"))
+            await bot.send_photo(
+                chat_id=TELEGRAM_CHAT_ID,
+                photo=types.FSInputFile(photo_path),
+                caption=f"{caption_base}\n📎 Фото {i}/{len(photos)}"
+            )
+            log(f"✅ Фото {photo_path} отправлено")
         except Exception as e:
             log(f"❌ Ошибка при отправке {photo_path}: {e}")
 
@@ -55,17 +72,21 @@ async def send_photos_to_telegram(photos: list[str]):
 # /start
 # ======================
 
-@dp.message(Command("start"))
+@dp.message(Command(commands=["start"]))
 async def start(message: types.Message):
     user_data[message.from_user.id] = {"photos": [], "sent": False}
     log(f"👤 Пользователь {message.from_user.id} нажал /start")
-    await message.answer("👋 Привет! Отправьте фото чеков по одному.", reply_markup=keyboard_no_send())
+    await message.answer(
+        "👋 Привет! Загрузите чеки отдельными фотографиями.\n"
+        "Когда закончите — нажмите «Отправить».",
+        reply_markup=keyboard_no_send()
+    )
 
 # ======================
 # Получение фото
 # ======================
 
-@dp.message(lambda m: m.photo)
+@dp.message(lambda message: message.content_type == "photo")
 async def receive_photo(message: types.Message):
     user_id = message.from_user.id
     if user_id not in user_data:
@@ -73,20 +94,25 @@ async def receive_photo(message: types.Message):
 
     index = len(user_data[user_id]["photos"]) + 1
     photo = message.photo[-1]
+
     file = await bot.get_file(photo.file_id)
     path = f"receipt_{user_id}_{index}.jpg"
     await bot.download_file(file.file_path, path)
+
     user_data[user_id]["photos"].append(path)
     user_data[user_id]["sent"] = False
 
     log(f"📸 Фото №{index} сохранено: {path}")
-    await message.answer(f"📸 Фото №{index} добавлено", reply_markup=keyboard_with_send())
+    await message.answer(
+        f"📸 Фото №{index} добавлено",
+        reply_markup=keyboard_with_send()
+    )
 
 # ======================
-# Отправка
+# Отправка чеков
 # ======================
 
-@dp.message(lambda m: m.text == "📨 Отправить")
+@dp.message(lambda message: message.text == "📨 Отправить")
 async def send_photos_command(message: types.Message):
     user_id = message.from_user.id
     data = user_data.get(user_id)
@@ -97,12 +123,12 @@ async def send_photos_command(message: types.Message):
         return
 
     if data.get("sent"):
-        log("⏳ Попытка повторной отправки")
+        log("⏳ Повторная отправка запрещена")
         await message.answer("⏳ Чеки уже отправлены")
         return
 
-    log(f"🚚 Отправка {len(data['photos'])} фото в Telegram...")
-    await send_photos_to_telegram(data["photos"])
+    log(f"🚚 Отправка {len(data['photos'])} фото в группу")
+    await send_photos_to_telegram(data["photos"], message.from_user)
 
     # удаляем локальные файлы
     for p in data["photos"]:
@@ -112,23 +138,30 @@ async def send_photos_command(message: types.Message):
 
     user_data[user_id] = {"photos": [], "sent": True}
     log(f"✅ Отправка завершена для пользователя {user_id}")
-    await message.answer("✅ Чеки отправлены! Можно отправлять новые фото", reply_markup=keyboard_no_send())
+
+    await message.answer(
+        "✅ Чеки отправлены! Можно загружать новые фото.",
+        reply_markup=keyboard_no_send()
+    )
 
 # ======================
 # Сброс
 # ======================
 
-@dp.message(lambda m: m.text == "❌ Сбросить")
+@dp.message(lambda message: message.text == "❌ Сбросить")
 async def reset(message: types.Message):
     user_id = message.from_user.id
     user_data[user_id] = {"photos": [], "sent": False}
     log(f"🔄 Пользователь {user_id} сбросил данные")
-    await message.answer("🔄 Сброшено. Отправьте фото чеков", reply_markup=keyboard_no_send())
+    await message.answer(
+        "🔄 Сброшено. Отправьте фото чеков.",
+        reply_markup=keyboard_no_send()
+    )
 
 # ======================
-# Запуск
+# Запуск бота
 # ======================
 
 if __name__ == "__main__":
-    log("🚀 Бот запущен через polling")
+    log("🚀 Бот запущен (polling)")
     asyncio.run(dp.start_polling(bot))
